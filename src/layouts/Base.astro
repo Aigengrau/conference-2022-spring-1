@@ -1,0 +1,353 @@
+---
+import '../styles/base.css';
+import page from '../data/page.json';
+
+const meta = page.meta;
+const sheets = page.sheets as string[];
+const webfonts = (meta.webfonts ?? []) as string[];
+
+const asset = (f: string) => `${import.meta.env.BASE_URL}/${f}`.replace(/\/+/g, '/');
+const canonical = new URL(Astro.url.pathname, Astro.site ?? 'https://example.com').href;
+
+/** Exported meta points at the local images folder; move it under /assets. */
+const local = (p: string) => (p ? asset(p.replace(/^\/?images\//, 'assets/img/').replace(/^\//, '')) : '');
+const favicon = local(meta.favicon);
+const ogImage = meta.ogImage ? new URL(local(meta.ogImage), Astro.site ?? canonical).href : '';
+---
+
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{meta.title}</title>
+    {meta.description && <meta name="description" content={meta.description} />}
+    <link rel="canonical" href={canonical} />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="ru_RU" />
+    <meta property="og:title" content={meta.ogTitle || meta.title} />
+    {(meta.ogDescription || meta.description) && (
+      <meta property="og:description" content={meta.ogDescription || meta.description} />
+    )}
+    <meta property="og:url" content={canonical} />
+    {ogImage && <meta property="og:image" content={ogImage} />}
+    {ogImage && <meta name="twitter:card" content="summary_large_image" />}
+
+    {favicon && <link rel="icon" href={favicon} />}
+    <meta name="format-detection" content="telephone=no" />
+
+    {/*
+      Montserrat, as the original loaded it. Without this everything falls back
+      to Arial: different metrics, different line breaks, and the page ends up
+      a few hundred pixels shorter.
+    */}
+    {webfonts.length > 0 && (
+      <>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+      </>
+    )}
+    {webfonts.map((href) => <link rel="stylesheet" href={href} />)}
+
+    {/* Exactly the stylesheets the original loaded, in the same order. */}
+    {sheets.map((s) => <link rel="stylesheet" href={asset(`styles/${s}`)} />)}
+
+    <script is:inline>
+      document.documentElement.classList.add('js');
+    </script>
+  </head>
+
+  <body class="t-body">
+    <div id="allrecords" class="t-records">
+      <slot />
+    </div>
+
+    <script>
+      // ---------------------------------------------------------------------
+      // Everything below replaces Tilda's JavaScript. Each piece does only what
+      // the original script did, driven by the same data attributes.
+      // ---------------------------------------------------------------------
+
+      // ---- lazy images -----------------------------------------------------
+      for (const el of document.querySelectorAll<HTMLElement>('[data-original]')) {
+        const src = el.getAttribute('data-original');
+        if (!src) continue;
+        if (el instanceof HTMLImageElement) {
+          el.src = src;
+          el.loading = 'lazy';
+          el.decoding = 'async';
+        } else {
+          el.style.backgroundImage = `url('${src}')`;
+        }
+        el.removeAttribute('data-original');
+      }
+
+      // ---- viewport-centred zero-block elements ----------------------------
+      // Exported as `top: calc(50vh - 0px + N)`, where the 0px stands in for
+      // half the element's height. Tilda filled that in once it could measure;
+      // so do we, and again whenever the window changes size.
+      const centred = [...document.querySelectorAll<HTMLElement>('[data-vcenter]')];
+      if (centred.length) {
+        const apply = () => {
+          for (const el of centred) {
+            if (!el.dataset.vcenterBase) el.dataset.vcenterBase = String(el.offsetTop);
+            const base = Number(el.dataset.vcenterBase);
+            el.style.top = `${base - el.offsetHeight / 2}px`;
+          }
+        };
+        apply();
+        // Re-measure once webfonts have settled, since they change text height.
+        if (document.fonts?.ready) document.fonts.ready.then(apply);
+        window.addEventListener('load', apply);
+        let resizeTimer = 0;
+        window.addEventListener('resize', () => {
+          window.clearTimeout(resizeTimer);
+          for (const el of centred) delete el.dataset.vcenterBase;
+          for (const el of centred) el.style.top = '';
+          resizeTimer = window.setTimeout(apply, 120);
+        });
+      }
+
+      // ---- cover blocks ----------------------------------------------------
+      // Tilda read the height and background off the wrapper and applied them
+      // to the cover element.
+      for (const el of document.querySelectorAll<HTMLElement>('[data-content-cover-height]')) {
+        const height = el.getAttribute('data-content-cover-height');
+        if (height) el.style.height = height;
+
+        const bg = el.getAttribute('data-content-cover-bg');
+        const target = el.querySelector<HTMLElement>('.t-cover__carrier') ?? el;
+        if (bg && !target.style.backgroundImage) {
+          target.style.backgroundImage = `url('${bg}')`;
+          if (height) target.style.height = height;
+        }
+        const filter = el.querySelector<HTMLElement>('.t-cover__filter');
+        if (filter && height) filter.style.height = height;
+      }
+
+      // ---- scroll reveal ---------------------------------------------------
+      // Tilda's stylesheet already defines both the start state (opacity 0) and
+      // the end state (.t-animate_started); only the trigger and the starting
+      // transform lived in JS.
+      const animated = [...document.querySelectorAll<HTMLElement>('.t-animate[data-animate-style]')];
+
+      const startTransform = (el: HTMLElement) => {
+        const d = parseFloat(el.dataset.animateDistance || '100') || 100;
+        switch (el.dataset.animateStyle) {
+          case 'fadeinleft': return `translateX(-${d}px)`;
+          case 'fadeinright': return `translateX(${d}px)`;
+          case 'fadeinup': return `translateY(${d}px)`;
+          case 'fadeindown': return `translateY(-${d}px)`;
+          case 'zoomin': return `scale(${parseFloat(el.dataset.animateScale || '0.9') || 0.9})`;
+          case 'zoomout': return `scale(${parseFloat(el.dataset.animateScale || '1.1') || 1.1})`;
+          default: return '';
+        }
+      };
+
+      const reveal = (el: HTMLElement) => {
+        if (el.dataset.revealed) return;
+        el.dataset.revealed = '1';
+        el.style.transform = '';
+        el.classList.add('t-animate_started');
+      };
+
+      if (animated.length) {
+        for (const el of animated) {
+          const t = startTransform(el);
+          if (t) el.style.transform = t;
+          if (el.dataset.animateDuration) el.style.transitionDuration = `${el.dataset.animateDuration}s`;
+          if (el.dataset.animateDelay) el.style.transitionDelay = `${el.dataset.animateDelay}s`;
+        }
+
+        const revealAll = () => animated.forEach(reveal);
+        if (!('IntersectionObserver' in window)) {
+          revealAll();
+        } else {
+          const io = new IntersectionObserver(
+            (entries) => {
+              for (const e of entries) {
+                if (!e.isIntersecting) continue;
+                reveal(e.target as HTMLElement);
+                io.unobserve(e.target);
+              }
+            },
+            { rootMargin: '0px 0px -10% 0px', threshold: 0.01 },
+          );
+          // Anything already on screen is revealed synchronously rather than
+          // waiting for the observer's first asynchronous callback.
+          const vh = window.innerHeight;
+          for (const el of animated) {
+            const r = el.getBoundingClientRect();
+            if (r.top < vh && r.bottom > 0) reveal(el);
+            else io.observe(el);
+          }
+          // Never strand content at opacity 0.
+          window.addEventListener('load', () => window.setTimeout(revealAll, 2500));
+        }
+      }
+
+      // ---- lazy video embeds -----------------------------------------------
+      const videoEmbed = (el: HTMLElement) => {
+        const type = el.getAttribute('data-videolazy-type');
+        const id = el.getAttribute('data-videolazy-id');
+        if (!id || el.querySelector('iframe')) return;
+
+        let src = '';
+        if (type === 'youtube') src = `https://www.youtube.com/embed/${id}`;
+        else if (type === 'vimeo') src = `https://player.vimeo.com/video/${id}`;
+        else if (type === 'rutube') {
+          const hash = el.getAttribute('data-videolazy-hash');
+          src = `https://rutube.ru/play/embed/${id}/${hash ? `?p=${hash}` : ''}`;
+        }
+        if (!src) return;
+
+        const frame = document.createElement('iframe');
+        frame.src = src;
+        frame.title = 'Видео';
+        frame.loading = 'lazy';
+        frame.allow = 'autoplay; fullscreen; picture-in-picture; encrypted-media';
+        frame.allowFullscreen = true;
+        frame.setAttribute('frameborder', '0');
+        frame.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;';
+        if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
+        el.appendChild(frame);
+      };
+
+      const videos = [...document.querySelectorAll<HTMLElement>('.t-video-lazyload[data-videolazy-id]')];
+      if (videos.length) {
+        if (!('IntersectionObserver' in window)) {
+          videos.forEach(videoEmbed);
+        } else {
+          const vio = new IntersectionObserver(
+            (entries) => {
+              for (const e of entries) {
+                if (!e.isIntersecting) continue;
+                videoEmbed(e.target as HTMLElement);
+                vio.unobserve(e.target);
+              }
+            },
+            { rootMargin: '400px' },
+          );
+          videos.forEach((v) => vio.observe(v));
+        }
+      }
+
+      // ---- popups ----------------------------------------------------------
+      // Tilda hooked each popup to an anchor via data-tooltip-hook="#name".
+      const popups = new Map<string, HTMLElement>();
+      for (const el of document.querySelectorAll<HTMLElement>('[data-tooltip-hook]')) {
+        const hook = el.getAttribute('data-tooltip-hook');
+        if (hook) popups.set(hook, el);
+      }
+
+      if (popups.size) {
+        let lastFocused: HTMLElement | null = null;
+
+        const closePopup = (el: HTMLElement) => {
+          el.removeAttribute('data-open');
+          document.body.style.overflow = '';
+          // Stop any embedded player that is still running.
+          el.querySelectorAll('iframe').forEach((f) => {
+            const src = f.getAttribute('src');
+            if (src) f.setAttribute('src', src);
+          });
+          lastFocused?.focus();
+        };
+
+        const openPopup = (el: HTMLElement) => {
+          lastFocused = document.activeElement as HTMLElement | null;
+          el.setAttribute('data-open', '');
+          el.setAttribute('role', 'dialog');
+          el.setAttribute('aria-modal', 'true');
+          el.tabIndex = -1;
+          document.body.style.overflow = 'hidden';
+          el.focus();
+        };
+
+        for (const [hook, el] of popups) {
+          el.querySelectorAll('.t-popup__close, .t-popup__block-close-button, [data-popup-close]').forEach((btn) =>
+            btn.addEventListener('click', () => closePopup(el)),
+          );
+          // Clicking the backdrop closes it, clicking the panel does not.
+          el.addEventListener('click', (event) => {
+            if (event.target === el) closePopup(el);
+          });
+          for (const link of document.querySelectorAll<HTMLAnchorElement>(`a[href="${hook}"]`)) {
+            link.addEventListener('click', (event) => {
+              event.preventDefault();
+              openPopup(el);
+            });
+          }
+        }
+
+        document.addEventListener('keydown', (event) => {
+          if (event.key !== 'Escape') return;
+          for (const el of popups.values()) if (el.hasAttribute('data-open')) closePopup(el);
+        });
+      }
+
+      // ---- cookie notice ---------------------------------------------------
+      // Ships with `t886_closed` (display:none) and its own storage key; the
+      // original script opened it unless consent had already been recorded.
+      for (const banner of document.querySelectorAll<HTMLElement>('.t886')) {
+        const key = banner.getAttribute('data-storage-item') || 't886cookie';
+        let accepted = false;
+        try {
+          accepted = localStorage.getItem(key) === 'yes';
+        } catch {
+          // Storage blocked (private mode): show the notice, just don't remember.
+        }
+        if (!accepted) banner.classList.remove('t886_closed');
+
+        banner.querySelector('.t886__btn')?.addEventListener('click', () => {
+          banner.classList.add('t886_closed');
+          try {
+            localStorage.setItem(key, 'yes');
+          } catch {
+            /* nothing to persist to */
+          }
+        });
+      }
+
+      // ---- burger menu -----------------------------------------------------
+      for (const burger of document.querySelectorAll<HTMLElement>('.t-menuburger')) {
+        const wrapper = burger.closest<HTMLElement>('[class*="__menu"], .t-menu, header') ?? burger.parentElement;
+        const panel = wrapper?.querySelector<HTMLElement>('[class*="__menu__wrapper"], [class*="__menu-list"], nav');
+        if (!panel) continue;
+
+        burger.setAttribute('role', 'button');
+        burger.setAttribute('tabindex', '0');
+        burger.setAttribute('aria-expanded', 'false');
+        burger.setAttribute('aria-label', 'Меню');
+
+        const toggle = () => {
+          const open = burger.getAttribute('aria-expanded') === 'true';
+          burger.setAttribute('aria-expanded', String(!open));
+          burger.classList.toggle('t-menuburger_opened', !open);
+          panel.classList.toggle('t-menu__wrapper_opened', !open);
+          panel.style.display = open ? '' : 'block';
+        };
+
+        burger.addEventListener('click', toggle);
+        burger.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            toggle();
+          }
+        });
+      }
+
+      // ---- in-page anchors -------------------------------------------------
+      for (const link of document.querySelectorAll<HTMLAnchorElement>('a[href^="#rec"], a[href^="#!/"]')) {
+        link.addEventListener('click', (event) => {
+          const id = link.getAttribute('href')?.slice(1);
+          const target = id ? document.getElementById(id) : null;
+          if (!target) return;
+          event.preventDefault();
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      }
+    </script>
+  </body>
+</html>

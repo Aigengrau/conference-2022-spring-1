@@ -1,0 +1,16 @@
+---
+import Base from '../layouts/Base.astro';
+import page from '../data/page.json';
+
+/**
+ * Block markup is raw HTML lifted from the export, so Vite never sees its
+ * URLs. Prefixing them here is also what makes a GitHub Pages project path
+ * (/repo/) work without touching the extracted content.
+ */
+const base = import.meta.env.BASE_URL.replace(/\/+$/, '');
+const withBase = (html: string) => (base ? html.replaceAll('="/assets/', `="${base}/assets/`) : html);
+---
+
+<Base>
+  {page.records.map((rec) => <Fragment set:html={withBase(rec.html)} />)}
+</Base>

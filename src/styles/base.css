@@ -1,0 +1,61 @@
+/* =========================================================================
+   Runtime styles
+   --------------------------------------------------------------------------
+   The stylesheets in /public/styles are Tilda's own, compiled for exactly the
+   blocks this page uses — that is the design spec and it is kept as-is.
+   This file covers only what Tilda's JavaScript used to apply at runtime,
+   since none of that JavaScript ships any more.
+   ========================================================================= */
+
+/* Tilda kept the records container hidden until its script faded it in. */
+.t-records {
+  opacity: 1;
+}
+
+/* Its zero-block script toggled this once an artboard had been measured. */
+.t396__artboard .tn-elem {
+  visibility: visible;
+}
+
+/*
+ * Animated blocks start at opacity 0 in Tilda's stylesheet and are revealed by
+ * adding `.t-animate_started`, which the runtime does. Gate that on the `.js`
+ * class (set inline in <head>) so a visitor without JavaScript — or a page
+ * whose script failed — still sees everything rather than a blank column.
+ */
+html:not(.js) .t-animate[data-animate-style] {
+  opacity: 1 !important;
+  transform: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-animate[data-animate-style] {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+}
+
+/* =========================================================================
+   Lazy video
+   Tilda's stylesheet only paints the placeholder; its script sized the box
+   before inserting the player. Measured against the original that box is 16:9.
+   ========================================================================= */
+
+.t-video-lazyload[data-videolazy-id] {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background-color: #000;
+}
+
+/* =========================================================================
+   Popups
+   ========================================================================= */
+
+.t-popup {
+  display: none;
+}
+
+.t-popup[data-open] {
+  display: block;
+}
